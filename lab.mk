@@ -1,5 +1,3 @@
-# Project automation
-
 BIN=main.out
  
 all: deps build run

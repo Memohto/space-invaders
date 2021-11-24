@@ -5,11 +5,14 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"math/rand"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // Defining the structs
+
 type Cell struct {
 	x int
 	y int
@@ -24,6 +27,7 @@ type Alien struct {
 type Game struct{}
 
 // Global variables
+
 const (
   WindowH = 640
   WindowW = 420
@@ -34,7 +38,24 @@ var (
   grid [][]int
   aliens []Alien
   alienSprite *ebiten.Image
+  alienSleepMS = 1000
 )
+
+// Helper functions
+
+func isSameCell(cell1, cell2 Cell) bool{
+  return cell1.x == cell2.x && cell1.y == cell2.y
+}
+
+func cellIsInBounds(cell Cell) bool {
+  return cell.x>=0 && cell.y>=0 && cell.x<len(grid[0]) && cell.y<len(grid)
+}
+
+func cellIsFree(cell Cell) bool{
+  return cellIsInBounds(cell) && grid[cell.y][cell.x]==0
+}
+
+// Game logic
 
 func initGrid(){
   rows := int(math.Floor(WindowH/CellSize))
@@ -46,6 +67,37 @@ func initGrid(){
   for i := range grid {
     grid[i] = make([]int, cols)
   }
+}
+
+func alienBrain(id int){
+  myAlien := &aliens[id-1]
+
+  for {
+    time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
+    moveAlien(myAlien)
+  }
+}
+
+func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
+  var target Cell
+
+  for isSameCell(alien.pos,target) || !cellIsFree(target) {
+    target = alien.pos
+    switch rand.Intn(4) {
+      case 0:// Down
+        target.y++
+      case 1:// Left
+        target.x--
+      case 2:// Right
+        target.x++
+      // Case 4 don't move
+      }
+  }
+
+  grid[target.y][target.x] = alien.id
+  alien.pos = target
+
+
 }
 
 func initAliens(amount int){
@@ -64,11 +116,11 @@ func initAliens(amount int){
 
   for i:= range aliens{
     aliens[i] = Alien{
-      id:i,
+      id:i+1,
       pos: Cell{x:curCol,y:curRow},
       sprite: alienSprite,
     }
-    grid[curRow][curCol] = i
+    grid[curRow][curCol] = i+1
     if curCol>0 && curCol%(len(grid[0])-1) == 0 {
       curRow++
       curCol=0
@@ -78,6 +130,8 @@ func initAliens(amount int){
   }
 
   fmt.Printf("Generated %d aliens\n",len(aliens))
+
+  go alienBrain(1)
 }
 
 func drawAliens(screen *ebiten.Image){
@@ -106,9 +160,11 @@ func main() {
   ebiten.SetWindowSize(WindowW, WindowH)
   ebiten.SetWindowTitle("Space Invaders")
   
+  rand.Seed(time.Now().UnixNano())
+
   initGrid()
   
-  initAliens(50)
+  initAliens(1)
 
 
   if err := ebiten.RunGame(game); err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 // Defining the structs
@@ -42,7 +43,8 @@ var (
   aliens []Alien
   alienSprite *ebiten.Image
   alienSleepMS = 1000
-  usableGridCells int
+  accessGrid chan bool
+  oX,oY,oXf,oYf float64
 )
 
 // Helper functions
@@ -92,13 +94,11 @@ func initGrid(){
     }
   }
 
-  totalCells := rows * cols
-
-  totalUnusableRows := TopUnusableRows + BotUnusableRows
-  unusableCellsOfRows := totalUnusableRows * cols
-  unusableSideCells := (rows - totalUnusableRows) * SideUnusableCols * 2
-
-  usableGridCells = totalCells - unusableCellsOfRows - unusableSideCells
+  offset := CellSize/2.0
+  oX = CellSize * SideUnusableCols - offset
+  oXf = WindowW - CellSize*SideUnusableCols + offset
+  oY = CellSize * TopUnusableRows - offset
+  oYf = WindowH-CellSize*BotUnusableRows + offset
 }
 
 func alienBrain(id int){
@@ -125,22 +125,33 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
       case 3:// Don't move
         noMovement=false
     }
-
+    
     if isSameCell(target,alien.pos) || cellIsFree(target) {
       noMovement = false
     }
+
   }
 
-  grid[alien.pos.y][alien.pos.x] = 0
-  grid[target.y][target.x] = alien.id
-  alien.pos = target
+  <- accessGrid
+
+  if cellIsFree(target) {
+    //If another Alien took the target position in the time frame
+    // between calculation and execution, we surrender the space
+    grid[alien.pos.y][alien.pos.x] = 0
+    grid[target.y][target.x] = alien.id
+    alien.pos = target
+  }
+
+  accessGrid <- true
 
 
 }
 
 func initAliens(amount int){
   // Alien maximum value is 50% of the grid, this logic may be moved later
-  cappedAmount := int(math.Min(float64(amount),float64(usableGridCells/2)))
+  maxCells := ((len(grid) - (BotUnusableRows + TopUnusableRows))/2) * (len(grid[0])-SideUnusableCols*2)
+  
+  cappedAmount := int(math.Min(float64(amount),float64(maxCells)))
 
   // Sprite
   alienSprite = ebiten.NewImage(CellSize,CellSize)
@@ -167,9 +178,12 @@ func initAliens(amount int){
     }
   }
 
+  for i:= range aliens {
+    go alienBrain(aliens[i].id)
+  }
+
   fmt.Printf("Generated %d aliens\n",len(aliens))
 
-  go alienBrain(1)
 }
 
 func drawAliens(screen *ebiten.Image){
@@ -180,6 +194,13 @@ func drawAliens(screen *ebiten.Image){
   }
 }
 
+func drawOverlay(screen *ebiten.Image){
+  ebitenutil.DrawLine(screen,oX,oY,oXf,oY,color.White)
+  ebitenutil.DrawLine(screen,oX,oY,oX,oYf,color.White)
+  ebitenutil.DrawLine(screen,oXf,oY,oXf,oYf,color.White)
+  ebitenutil.DrawLine(screen,oX,oYf,oXf,oYf,color.White)
+}
+
 func (g *Game) Update() error {
   // Write your game's logical update.
   return nil
@@ -187,6 +208,7 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
   drawAliens(screen)
+  drawOverlay(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -202,7 +224,10 @@ func main() {
 
   initGrid()
 
-  initAliens(1)
+  accessGrid = make( chan bool , 1)
+  accessGrid <- true
+
+  initAliens(20)
 
 
   if err := ebiten.RunGame(game); err != nil {

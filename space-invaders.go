@@ -5,10 +5,14 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"math/rand"
+	"time"
+
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // Defining the structs
+
 type Game struct {}
 
 type Cell struct {
@@ -28,10 +32,14 @@ type Player struct {
 }
 
 // Global variables
+
 const (
   WindowH = 640
   WindowW = 420
   CellSize = 20
+  TopUnusableRows = 2
+  BotUnusableRows = 3
+  SideUnusableCols = 1 // Unusable cols on the left and right
 )
 
 var (
@@ -39,7 +47,31 @@ var (
   aliens []Alien
   alienSprite *ebiten.Image
   player = Player{x: WindowW/2-10, y: WindowH-25}  
+  alienSleepMS = 1000
+  usableGridCells int
 )
+
+// Helper functions
+
+func isSameCell(cell1, cell2 Cell) bool{
+  return cell1.x == cell2.x && cell1.y == cell2.y
+}
+
+func cellIsInBounds(cell Cell) bool {
+  return cell.x>=0 && cell.y>=0 && cell.x<len(grid[0]) && cell.y<len(grid)
+}
+
+func cellIsFree(cell Cell) bool{
+  return cellIsInBounds(cell) && grid[cell.y][cell.x] == 0
+}
+
+func disableGridRow(row int){
+  for i:= range grid[row]{
+    grid[row][i]=-1
+  }
+}
+
+// Game logic
 
 func initGrid(){
   rows := int(math.Floor(WindowH/CellSize))
@@ -48,14 +80,73 @@ func initGrid(){
   fmt.Printf("%dx%d grid created\n",cols,rows)
   
   grid = make([][]int, rows)
+
+  topUnusable := TopUnusableRows
   for i := range grid {
     grid[i] = make([]int, cols)
+    if topUnusable>0 {
+      topUnusable--
+      disableGridRow(i)
+    }else if rows-1-i < BotUnusableRows{
+      disableGridRow(i)
+    }else{
+      for j := range grid[i] {
+        if j<SideUnusableCols || cols-1-j<SideUnusableCols{
+          grid[i][j]=-1
+        }
+      }
+    }
   }
+
+  totalCells := rows * cols
+
+  totalUnusableRows := TopUnusableRows + BotUnusableRows
+  unusableCellsOfRows := totalUnusableRows * cols
+  unusableSideCells := (rows - totalUnusableRows) * SideUnusableCols * 2
+
+  usableGridCells = totalCells - unusableCellsOfRows - unusableSideCells
+}
+
+func alienBrain(id int){
+  myAlien := &aliens[id-1]
+
+  for {
+    time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
+    moveAlien(myAlien)
+  }
+}
+
+func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
+  var target Cell
+
+  for noMovement := true; noMovement; {// Do while
+    target = alien.pos
+    switch rand.Intn(4) {
+      case 0:// Down
+        target.y++
+      case 1:// Left
+        target.x--
+      case 2:// Right
+        target.x++
+      case 3:// Don't move
+        noMovement=false
+    }
+
+    if isSameCell(target,alien.pos) || cellIsFree(target) {
+      noMovement = false
+    }
+  }
+
+  grid[alien.pos.y][alien.pos.x] = 0
+  grid[target.y][target.x] = alien.id
+  alien.pos = target
+
+
 }
 
 func initAliens(amount int){
   // Alien maximum value is 50% of the grid, this logic may be moved later
-  cappedAmount := int(math.Min(float64(amount),math.Floor(float64(len(grid)*len(grid[0]))/2)))
+  cappedAmount := int(math.Min(float64(amount),float64(usableGridCells/2)))
 
   // Sprite
   alienSprite = ebiten.NewImage(CellSize,CellSize)
@@ -64,25 +155,27 @@ func initAliens(amount int){
 
   aliens = make([]Alien, cappedAmount)
 
-  curRow := 0
-  curCol := 0
+  curRow := TopUnusableRows
+  curCol := SideUnusableCols
 
   for i:= range aliens{
     aliens[i] = Alien{
-      id:i,
+      id:i+1,
       pos: Cell{x:curCol,y:curRow},
       sprite: alienSprite,
     }
-    grid[curRow][curCol] = i
-    if curCol>0 && curCol%(len(grid[0])-1) == 0 {
+    grid[curRow][curCol] = i+1
+    if curCol>0 && curCol%(len(grid[0])-1-SideUnusableCols) == 0 {
       curRow++
-      curCol=0
+      curCol = SideUnusableCols
     }else{
       curCol++
     }
   }
 
   fmt.Printf("Generated %d aliens\n",len(aliens))
+
+  go alienBrain(1)
 }
 
 func drawAliens(screen *ebiten.Image){
@@ -121,9 +214,11 @@ func main() {
   ebiten.SetWindowSize(WindowW, WindowH)
   ebiten.SetWindowTitle("Space Invaders")
   
+  rand.Seed(time.Now().UnixNano())
+
   initGrid()
-  
-  initAliens(50)
+
+  initAliens(1)
 
 
   if err := ebiten.RunGame(game); err != nil {

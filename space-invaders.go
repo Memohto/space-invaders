@@ -5,11 +5,12 @@ import (
 	"image/color"
 	"log"
 	"math"
-
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // Defining the structs
+type Game struct {}
+
 type Cell struct {
 	x int
 	y int
@@ -21,7 +22,10 @@ type Alien struct {
   sprite *ebiten.Image
 }
 
-type Game struct{}
+type Player struct {
+  x float64
+  y float64
+}
 
 // Global variables
 const (
@@ -34,6 +38,7 @@ var (
   grid [][]int
   aliens []Alien
   alienSprite *ebiten.Image
+  player = Player{x: WindowW/2-10, y: WindowH-25}  
 )
 
 func initGrid(){
@@ -89,11 +94,21 @@ func drawAliens(screen *ebiten.Image){
 }
 
 func (g *Game) Update() error {
-  // Write your game's logical update.
+  if ebiten.IsKeyPressed(ebiten.KeyRight) {
+    player.x += 5
+  } 
+  if ebiten.IsKeyPressed(ebiten.KeyLeft) {
+    player.x -= 5
+  }
   return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+  opts := &ebiten.DrawImageOptions{}
+  opts.GeoM.Translate(player.x, player.y)
+  img := ebiten.NewImage(20, 20)
+  img.Fill(color.RGBA{0, 255, 0, 255})
+  screen.DrawImage(img, opts)
   drawAliens(screen)
 }
 

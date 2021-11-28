@@ -56,6 +56,14 @@ const (
   MaxBullets = 100
   BulletXOffset = 8
   BulletYOffset = 3
+
+  AlienSleepMS = 1000
+  PlayerMoveSleepMS = 150
+  PlayerShootSleepMS = 1000
+  BulletSleepMS = 50
+  AlienBulletSleepMS = 100
+  AliensDeadTicks = 15
+  AlienShootProbability = 0.05
 )
 
 var (
@@ -63,16 +71,10 @@ var (
   score int
   grid [][]int
   aliens []Alien
-  alienSleepMS = 1000
   accessGrid chan bool
   oX,oY,oXf,oYf float64
   player Player
-  playerMoveSleepMS = 150
-  playerShootSleepMS = 1000
   bullets []Bullet
-  bulletSleepMS = 50
-  alienBulletSleepMS = 100
-  aliensDeadTicks = 15
 
   //Imgs
   imgIcon *ebiten.Image
@@ -206,7 +208,7 @@ func alienBrain(id int){
   myAlien := &aliens[id-2]
 
   for !myAlien.dead && gameState == 0{
-    time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
+    time.Sleep(time.Duration(AlienSleepMS) * time.Millisecond)
     moveAlien(myAlien)
     alienShoot(myAlien)
   }
@@ -234,7 +236,7 @@ func generateAlienBullet(alien *Alien) {
 }
 
 func alienShoot(alien *Alien){
-  if rand.Float64()<0.05{
+  if rand.Float64()<AlienShootProbability{
     generateAlienBullet(alien)
   }
 }
@@ -299,7 +301,7 @@ func initAliens(amount int){
       id:i+2,
       pos: Cell{x:curCol,y:curRow},
       sprite: imgAliens[alienVariant],
-      deadTicks: aliensDeadTicks,
+      deadTicks: AliensDeadTicks,
     }
     alienVariant = (alienVariant+1)%(len(imgAliens))
     grid[curRow][curCol] = aliens[i].id
@@ -341,12 +343,12 @@ func moveBullet(bullet *Bullet, direction int) {
         grid[bullet.pos.y][bullet.pos.x] = 0
         bullet.pos.y += direction
         grid[bullet.pos.y][bullet.pos.x] = -2
-        time.Sleep(time.Duration(bulletSleepMS) * time.Millisecond)
+        time.Sleep(time.Duration(BulletSleepMS) * time.Millisecond)
     }
   }else{
     for !isSameCell(player.pos,bullet.pos) && bullet.pos.y < player.pos.y {
       bullet.pos.y += direction
-      time.Sleep(time.Duration(alienBulletSleepMS) * time.Millisecond)
+      time.Sleep(time.Duration(AlienBulletSleepMS) * time.Millisecond)
     }
   }
 
@@ -376,7 +378,7 @@ func drawBullets(screen *ebiten.Image) {
 
 func playerMove() {
   for player.lives > 0 && gameState == 0 {
-    time.Sleep(time.Duration(playerMoveSleepMS) * time.Millisecond)
+    time.Sleep(time.Duration(PlayerMoveSleepMS) * time.Millisecond)
     if ebiten.IsKeyPressed(ebiten.KeyRight) && cellIsFree(Cell{x:player.pos.x + 1,y:player.pos.y}) {
       grid[player.pos.y][player.pos.x] = 0; 
       player.pos.x += 1
@@ -394,7 +396,7 @@ func playerShoot() {
   for player.lives > 0 && gameState == 0 {
     if ebiten.IsKeyPressed(ebiten.KeySpace) {
       generatePlayerBullet()
-      time.Sleep(time.Duration(playerShootSleepMS) * time.Millisecond)
+      time.Sleep(time.Duration(PlayerShootSleepMS) * time.Millisecond)
     } 
   }
 }

@@ -5,6 +5,7 @@ all: deps build run
 deps:
 	go get github.com/hajimehoshi/ebiten/v2
 	go get github.com/hajimehoshi/ebiten/v2/ebitenutil
+	go get github.com/nfnt/resize
  
 build:
 	go build -o $(BIN) .

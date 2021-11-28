@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
+	_ "image/png"
 	"log"
 	"math"
 	"math/rand"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/nfnt/resize"
 )
 
 // Defining the structs
@@ -26,6 +29,7 @@ type Alien struct {
   dead bool
   pos Cell
   sprite *ebiten.Image
+  deadTicks int
 }
 
 type Player struct {
@@ -59,17 +63,22 @@ var (
   score int
   grid [][]int
   aliens []Alien
-  alienSprite *ebiten.Image
   alienSleepMS = 1000
   accessGrid chan bool
   oX,oY,oXf,oYf float64
   player Player
-  playerSprite *ebiten.Image
   playerMoveSleepMS = 150
   playerShootSleepMS = 1000
   bullets []Bullet
-  bulletSprite  *ebiten.Image
   bulletSleepMS = 50
+  aliensDeadTicks = 15
+
+  //Imgs
+  imgIcon *ebiten.Image
+  imgAliens []*ebiten.Image
+  imgPlayer *ebiten.Image
+  imgBullet *ebiten.Image
+  imgExpl *ebiten.Image
 )
 
 // Helper functions
@@ -115,6 +124,11 @@ func countAliens() int {
   return count
 }
 
+func getSubImgFrom(sheet *ebiten.Image,x,y int)*ebiten.Image{
+  return sheet.SubImage(image.Rect(CellSize*x,y*CellSize,CellSize*(x+1),CellSize*(y+1))).(*ebiten.Image)
+}
+
+
 // Game logic
 
 func initGrid(){
@@ -145,8 +159,42 @@ func initGrid(){
   offset := CellSize/2.0
   oX = CellSize * SideUnusableCols - offset
   oXf = WindowW - CellSize*SideUnusableCols + offset
-  oY = CellSize * TopUnusableRows - offset
-  oYf = WindowH-CellSize*BotUnusableRows + offset
+  oY = WindowH-CellSize*(BotUnusableRows-1) - offset
+  oYf = WindowH - offset
+}
+
+func loadImages() error{
+  var err error
+
+  imgIcon,_,err = ebitenutil.NewImageFromFile("img/GameIcon.png")
+  if err != nil {
+    return err
+  }
+
+  icon := make([]image.Image, 1)
+  icon[0]=imgIcon
+  ebiten.SetWindowIcon(icon)
+
+  _,spriteSheet,err := ebitenutil.NewImageFromFile("img/SpaceInvaders.png")
+  if err != nil {
+    return err
+  }
+
+  resizedSpriteSheet := ebiten.NewImageFromImage(resize.Resize(CellSize*7,CellSize*5,spriteSheet,resize.NearestNeighbor))
+
+ 
+  imgPlayer = getSubImgFrom(resizedSpriteSheet,4,0)
+  
+  imgBullet = getSubImgFrom(resizedSpriteSheet,2,0)
+
+  imgAliens = make([]*ebiten.Image,3)
+  imgAliens[0] = getSubImgFrom(resizedSpriteSheet,0,0)
+  imgAliens[1] = getSubImgFrom(resizedSpriteSheet,0,1)
+  imgAliens[2] = getSubImgFrom(resizedSpriteSheet,0,2)
+
+  imgExpl = getSubImgFrom(resizedSpriteSheet,2,3)
+
+  return nil
 }
 
 func alienBrain(id int){
@@ -201,22 +249,21 @@ func initAliens(amount int){
   
   cappedAmount := int(math.Min(float64(amount),float64(maxCells)))
 
-  // Sprite
-  alienSprite = ebiten.NewImage(CellSize,CellSize)
-  debugColor:= color.RGBA{uint8(255), 0, 0, uint8(255)}
-  alienSprite.Fill(debugColor)
-
   aliens = make([]Alien, cappedAmount)
 
   curRow := TopUnusableRows
   curCol := SideUnusableCols
 
+  alienVariant := 0
+
   for i:= range aliens{
     aliens[i] = Alien{
       id:i+2,
       pos: Cell{x:curCol,y:curRow},
-      sprite: alienSprite,
+      sprite: imgAliens[alienVariant],
+      deadTicks: aliensDeadTicks,
     }
+    alienVariant = (alienVariant+1)%(len(imgAliens))
     grid[curRow][curCol] = aliens[i].id
     if curCol>0 && curCol%(len(grid[0])-1-SideUnusableCols) == 0 {
       curRow+=2
@@ -239,6 +286,10 @@ func drawAliens(screen *ebiten.Image){
       options := new(ebiten.DrawImageOptions)
       options.GeoM.Translate(float64(aliens[i].pos.x*CellSize),float64(aliens[i].pos.y*CellSize))
       screen.DrawImage(aliens[i].sprite,options)
+    }else if a.deadTicks>0{
+      options := new(ebiten.DrawImageOptions)
+      options.GeoM.Translate(float64(aliens[i].pos.x*CellSize),float64(aliens[i].pos.y*CellSize))
+      screen.DrawImage(imgExpl,options)
     }
   }
 }
@@ -257,19 +308,13 @@ func moveBullet(bullet *Bullet, direction int) {
 
 func initBullets() {
   bullets = make([]Bullet, MaxBullets)
-
-  xSize := CellSize - BulletXOffset*2
-  ySize := CellSize - BulletYOffset*2
-  bulletSprite = ebiten.NewImage(xSize,ySize)
-  debugColor := color.RGBA{uint8(255), uint8(255), uint8(255), uint8(255)}
-  bulletSprite.Fill(debugColor)
 }
 
 func drawBullets(screen *ebiten.Image) {
   for _, b := range bullets {
     if b.ready {
       options := new(ebiten.DrawImageOptions)
-      options.GeoM.Translate(float64(b.pos.x*CellSize+BulletXOffset), float64(b.pos.y*CellSize+BulletYOffset))
+      options.GeoM.Translate(float64(b.pos.x*CellSize), float64(b.pos.y*CellSize))
       screen.DrawImage(b.sprite, options)
     }
   }
@@ -309,7 +354,7 @@ func generatePlayerBullet() {
       bullets[i] = Bullet{
         ready: true,
         pos: Cell{x:xPos, y:yPos},
-        sprite: bulletSprite,
+        sprite: imgBullet,
       }
       go moveBullet(&bullets[i], -1)
       break
@@ -318,16 +363,16 @@ func generatePlayerBullet() {
 }
 
 func initPlayer() {
-  playerSprite = ebiten.NewImage(CellSize,CellSize)
-  debugColor:= color.RGBA{0, uint8(255), 0, uint8(255)}
-  playerSprite.Fill(debugColor)
+  //playerSprite = ebiten.NewImage(CellSize,CellSize)
+  //debugColor:= color.RGBA{0, uint8(255), 0, uint8(255)}
+  //playerSprite.Fill(debugColor)
   
   xPos := (WindowW/CellSize - SideUnusableCols*2) / 2
   yPos := WindowH/CellSize - BotUnusableRows - 1
   player = Player{
     lives: 10, 
     pos: Cell{x:xPos,y:yPos},
-    sprite: playerSprite,
+    sprite: imgPlayer,
   }
 
   go playerMove()
@@ -367,14 +412,19 @@ func (g *Game) Update() error {
   } else if player.lives < 0 && gameState == 0 {
     gameState = 2
   }
+  for i:= range aliens{
+    if aliens[i].dead && aliens[i].deadTicks>0 {
+      aliens[i].deadTicks--
+    }
+  }
   return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+  drawOverlay(screen)
   drawBullets(screen)
   drawPlayer(screen)
   drawAliens(screen)
-  drawOverlay(screen)
   drawText(screen)
 }
 
@@ -384,6 +434,10 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 
 func main() {
   game := &Game{}
+ 
+	if  err := loadImages(); err != nil {
+		log.Fatal(err)
+	}
   ebiten.SetWindowSize(WindowW, WindowH)
   ebiten.SetWindowTitle("Space Invaders")
   

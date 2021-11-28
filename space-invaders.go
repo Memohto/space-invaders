@@ -149,7 +149,7 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
 
 func initAliens(amount int){
   // Alien maximum value is 50% of the grid, this logic may be moved later
-  maxCells := ((len(grid) - (BotUnusableRows + TopUnusableRows))/2) * (len(grid[0])-SideUnusableCols*2)
+  maxCells := ((len(grid) - (BotUnusableRows + TopUnusableRows))/4) * (len(grid[0])-SideUnusableCols*2)
   
   cappedAmount := int(math.Min(float64(amount),float64(maxCells)))
 
@@ -171,7 +171,7 @@ func initAliens(amount int){
     }
     grid[curRow][curCol] = i+1
     if curCol>0 && curCol%(len(grid[0])-1-SideUnusableCols) == 0 {
-      curRow++
+      curRow+=2
       curCol = SideUnusableCols
     }else{
       curCol++
@@ -227,7 +227,7 @@ func main() {
   accessGrid = make( chan bool , 1)
   accessGrid <- true
 
-  initAliens(20)
+  initAliens(200)
 
 
   if err := ebiten.RunGame(game); err != nil {

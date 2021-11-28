@@ -56,6 +56,14 @@ const (
   MaxBullets = 100
   BulletXOffset = 8
   BulletYOffset = 3
+
+  AlienSleepMS = 1000
+  PlayerMoveSleepMS = 150
+  PlayerShootSleepMS = 1000
+  BulletSleepMS = 50
+  AlienBulletSleepMS = 100
+  AliensDeadTicks = 15
+  AlienShootProbability = 0.05
 )
 
 var (
@@ -63,15 +71,10 @@ var (
   score int
   grid [][]int
   aliens []Alien
-  alienSleepMS = 1000
   accessGrid chan bool
   oX,oY,oXf,oYf float64
   player Player
-  playerMoveSleepMS = 150
-  playerShootSleepMS = 1000
   bullets []Bullet
-  bulletSleepMS = 50
-  aliensDeadTicks = 15
 
   //Imgs
   imgIcon *ebiten.Image
@@ -79,6 +82,7 @@ var (
   imgPlayer *ebiten.Image
   imgBullet *ebiten.Image
   imgExpl *ebiten.Image
+  imgAlienBullet *ebiten.Image
 )
 
 // Helper functions
@@ -194,6 +198,9 @@ func loadImages() error{
 
   imgExpl = getSubImgFrom(resizedSpriteSheet,2,3)
 
+  imgAlienBullet = getSubImgFrom(resizedSpriteSheet,2,1)
+
+
   return nil
 }
 
@@ -201,8 +208,36 @@ func alienBrain(id int){
   myAlien := &aliens[id-2]
 
   for !myAlien.dead && gameState == 0{
-    time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
+    time.Sleep(time.Duration(AlienSleepMS) * time.Millisecond)
     moveAlien(myAlien)
+    alienShoot(myAlien)
+  }
+}
+
+func alienDamage(){
+  player.lives--
+}
+
+func generateAlienBullet(alien *Alien) {
+  for i, b := range bullets {
+    if !b.ready {
+      xPos := alien.pos.x
+      yPos := alien.pos.y-1
+      grid[yPos][xPos] = -2
+      bullets[i] = Bullet{
+        ready: true,
+        pos: Cell{x:xPos, y:yPos},
+        sprite: imgAlienBullet,
+      }
+      go moveBullet(&bullets[i], 1)
+      break
+    }
+  }
+}
+
+func alienShoot(alien *Alien){
+  if rand.Float64()<AlienShootProbability{
+    generateAlienBullet(alien)
   }
 }
 
@@ -240,6 +275,11 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
 
   accessGrid <- true
 
+  if alien.pos.y >= player.pos.y {
+    alien.dead = true
+    alienDamage()
+  }
+
 
 }
 
@@ -261,7 +301,7 @@ func initAliens(amount int){
       id:i+2,
       pos: Cell{x:curCol,y:curRow},
       sprite: imgAliens[alienVariant],
-      deadTicks: aliensDeadTicks,
+      deadTicks: AliensDeadTicks,
     }
     alienVariant = (alienVariant+1)%(len(imgAliens))
     grid[curRow][curCol] = aliens[i].id
@@ -295,15 +335,31 @@ func drawAliens(screen *ebiten.Image){
 }
 
 func moveBullet(bullet *Bullet, direction int) {
-  for bullet.ready && cellIsFree(Cell{bullet.pos.x, bullet.pos.y-1}) {
-    grid[bullet.pos.y][bullet.pos.x] = 0
-    bullet.pos.y += direction
-    grid[bullet.pos.y][bullet.pos.x] = -2
-    time.Sleep(time.Duration(bulletSleepMS) * time.Millisecond)
+
+  isPlayer := direction<0
+
+  if isPlayer {
+    for cellIsFree(Cell{bullet.pos.x, bullet.pos.y-1}) {
+        grid[bullet.pos.y][bullet.pos.x] = 0
+        bullet.pos.y += direction
+        grid[bullet.pos.y][bullet.pos.x] = -2
+        time.Sleep(time.Duration(BulletSleepMS) * time.Millisecond)
+    }
+  }else{
+    for !isSameCell(player.pos,bullet.pos) && bullet.pos.y < player.pos.y {
+      bullet.pos.y += direction
+      time.Sleep(time.Duration(AlienBulletSleepMS) * time.Millisecond)
+    }
   }
+
   bullet.ready = false
-  grid[bullet.pos.y][bullet.pos.x] = 0
-  checkCollision(grid[bullet.pos.y-1][bullet.pos.x])
+
+  if isPlayer{
+    grid[bullet.pos.y][bullet.pos.x] = 0
+    checkCollision(grid[bullet.pos.y-1][bullet.pos.x])
+  }else if isSameCell(player.pos,bullet.pos){
+    alienDamage()
+  }
 }
 
 func initBullets() {
@@ -322,7 +378,7 @@ func drawBullets(screen *ebiten.Image) {
 
 func playerMove() {
   for player.lives > 0 && gameState == 0 {
-    time.Sleep(time.Duration(playerMoveSleepMS) * time.Millisecond)
+    time.Sleep(time.Duration(PlayerMoveSleepMS) * time.Millisecond)
     if ebiten.IsKeyPressed(ebiten.KeyRight) && cellIsFree(Cell{x:player.pos.x + 1,y:player.pos.y}) {
       grid[player.pos.y][player.pos.x] = 0; 
       player.pos.x += 1
@@ -340,7 +396,7 @@ func playerShoot() {
   for player.lives > 0 && gameState == 0 {
     if ebiten.IsKeyPressed(ebiten.KeySpace) {
       generatePlayerBullet()
-      time.Sleep(time.Duration(playerShootSleepMS) * time.Millisecond)
+      time.Sleep(time.Duration(PlayerShootSleepMS) * time.Millisecond)
     } 
   }
 }
@@ -422,10 +478,10 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
   drawOverlay(screen)
-  drawBullets(screen)
   drawPlayer(screen)
   drawAliens(screen)
   drawText(screen)
+  drawBullets(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {

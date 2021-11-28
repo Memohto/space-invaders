@@ -7,8 +7,9 @@ import (
 	"math"
 	"math/rand"
 	"time"
+
 	"github.com/hajimehoshi/ebiten/v2"
-  "github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 // Defining the structs
@@ -57,10 +58,11 @@ var (
   gameState int // 0 = on going, 1 = win, 2 = lose
   score int
   grid [][]int
-  usableGridCells int
   aliens []Alien
   alienSprite *ebiten.Image
   alienSleepMS = 1000
+  accessGrid chan bool
+  oX,oY,oXf,oYf float64
   player Player
   playerSprite *ebiten.Image
   playerMoveSleepMS = 150
@@ -140,17 +142,15 @@ func initGrid(){
     }
   }
 
-  totalCells := rows * cols
-
-  totalUnusableRows := TopUnusableRows + BotUnusableRows
-  unusableCellsOfRows := totalUnusableRows * cols
-  unusableSideCells := (rows - totalUnusableRows) * SideUnusableCols * 2
-
-  usableGridCells = totalCells - unusableCellsOfRows - unusableSideCells
+  offset := CellSize/2.0
+  oX = CellSize * SideUnusableCols - offset
+  oXf = WindowW - CellSize*SideUnusableCols + offset
+  oY = CellSize * TopUnusableRows - offset
+  oYf = WindowH-CellSize*BotUnusableRows + offset
 }
 
 func alienBrain(id int){
-  myAlien := &aliens[id]
+  myAlien := &aliens[id-2]
 
   for !myAlien.dead && gameState == 0{
     time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
@@ -173,20 +173,33 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
       case 3:// Don't move
         noMovement=false
     }
-
+    
     if isSameCell(target,alien.pos) || cellIsFree(target) {
       noMovement = false
     }
+
   }
 
-  grid[alien.pos.y][alien.pos.x] = 0
-  grid[target.y][target.x] = alien.id
-  alien.pos = target
+  <- accessGrid
+
+  if cellIsFree(target) {
+    //If another Alien took the target position in the time frame
+    // between calculation and execution, we surrender the space
+    grid[alien.pos.y][alien.pos.x] = 0
+    grid[target.y][target.x] = alien.id
+    alien.pos = target
+  }
+
+  accessGrid <- true
+
+
 }
 
 func initAliens(amount int){
   // Alien maximum value is 50% of the grid, this logic may be moved later
-  cappedAmount := int(math.Min(float64(amount),float64(usableGridCells/2)))
+  maxCells := ((len(grid) - (BotUnusableRows + TopUnusableRows))/4) * (len(grid[0])-SideUnusableCols*2)
+  
+  cappedAmount := int(math.Min(float64(amount),float64(maxCells)))
 
   // Sprite
   alienSprite = ebiten.NewImage(CellSize,CellSize)
@@ -206,12 +219,15 @@ func initAliens(amount int){
     }
     grid[curRow][curCol] = aliens[i].id
     if curCol>0 && curCol%(len(grid[0])-1-SideUnusableCols) == 0 {
-      curRow++
+      curRow+=2
       curCol = SideUnusableCols
     }else{
       curCol++
     }
-    go alienBrain(i)
+  }
+
+  for i:= range aliens {
+    go alienBrain(aliens[i].id)
   }
 
   fmt.Printf("Generated %d aliens\n",len(aliens))
@@ -338,6 +354,13 @@ func drawText(screen *ebiten.Image) {
   }
 }
 
+func drawOverlay(screen *ebiten.Image){
+  ebitenutil.DrawLine(screen,oX,oY,oXf,oY,color.White)
+  ebitenutil.DrawLine(screen,oX,oY,oX,oYf,color.White)
+  ebitenutil.DrawLine(screen,oXf,oY,oXf,oYf,color.White)
+  ebitenutil.DrawLine(screen,oX,oYf,oXf,oYf,color.White)
+}
+
 func (g *Game) Update() error {
   if countAliens() == 0 && gameState == 0 {
     gameState = 1
@@ -351,6 +374,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
   drawBullets(screen)
   drawPlayer(screen)
   drawAliens(screen)
+  drawOverlay(screen)
   drawText(screen)
 }
 
@@ -366,9 +390,13 @@ func main() {
   rand.Seed(time.Now().UnixNano())
 
   initGrid()
+
+  accessGrid = make( chan bool , 1)
+  accessGrid <- true
+
   initBullets()
   initPlayer()
-  initAliens(1)
+  initAliens(200)
 
   if err := ebiten.RunGame(game); err != nil {
     log.Fatal(err)

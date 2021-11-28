@@ -7,11 +7,13 @@ import (
 	"math"
 	"math/rand"
 	"time"
-
 	"github.com/hajimehoshi/ebiten/v2"
+  "github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 // Defining the structs
+
+type Game struct {}
 
 type Cell struct {
 	x int
@@ -20,11 +22,22 @@ type Cell struct {
 
 type Alien struct {
   id int
+  dead bool
   pos Cell
   sprite *ebiten.Image
 }
 
-type Game struct{}
+type Player struct {
+  lives int
+  pos Cell
+  sprite *ebiten.Image
+}
+
+type Bullet struct {
+  ready bool
+  pos Cell
+  sprite *ebiten.Image
+}
 
 // Global variables
 
@@ -35,14 +48,26 @@ const (
   TopUnusableRows = 2
   BotUnusableRows = 3
   SideUnusableCols = 1 // Unusable cols on the left and right
+  MaxBullets = 100
+  BulletXOffset = 8
+  BulletYOffset = 3
 )
 
 var (
+  gameState int // 0 = on going, 1 = win, 2 = lose
+  score int
   grid [][]int
+  usableGridCells int
   aliens []Alien
   alienSprite *ebiten.Image
   alienSleepMS = 1000
-  usableGridCells int
+  player Player
+  playerSprite *ebiten.Image
+  playerMoveSleepMS = 150
+  playerShootSleepMS = 1000
+  bullets []Bullet
+  bulletSprite  *ebiten.Image
+  bulletSleepMS = 50
 )
 
 // Helper functions
@@ -63,6 +88,29 @@ func disableGridRow(row int){
   for i:= range grid[row]{
     grid[row][i]=-1
   }
+}
+
+func checkCollision(gridValue int) {
+  if gridValue > 0 {
+    for i, a := range aliens {
+      if a.id == gridValue {
+        aliens[i].dead = true
+        grid[a.pos.y][a.pos.x] = 0
+        score += 1
+        break
+      }
+    }
+  }
+}
+
+func countAliens() int {
+  count := 0
+  for _, a := range aliens {
+    if !a.dead {
+      count += 1
+    }
+  }
+  return count
 }
 
 // Game logic
@@ -102,9 +150,9 @@ func initGrid(){
 }
 
 func alienBrain(id int){
-  myAlien := &aliens[id-1]
+  myAlien := &aliens[id]
 
-  for {
+  for !myAlien.dead && gameState == 0{
     time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
     moveAlien(myAlien)
   }
@@ -113,7 +161,7 @@ func alienBrain(id int){
 func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
   var target Cell
 
-  for noMovement := true; noMovement; {// Do while
+  for noMovement := true; noMovement && !alien.dead; {// Do while
     target = alien.pos
     switch rand.Intn(4) {
       case 0:// Down
@@ -134,8 +182,6 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
   grid[alien.pos.y][alien.pos.x] = 0
   grid[target.y][target.x] = alien.id
   alien.pos = target
-
-
 }
 
 func initAliens(amount int){
@@ -154,39 +200,158 @@ func initAliens(amount int){
 
   for i:= range aliens{
     aliens[i] = Alien{
-      id:i+1,
+      id:i+2,
       pos: Cell{x:curCol,y:curRow},
       sprite: alienSprite,
     }
-    grid[curRow][curCol] = i+1
+    grid[curRow][curCol] = aliens[i].id
     if curCol>0 && curCol%(len(grid[0])-1-SideUnusableCols) == 0 {
       curRow++
       curCol = SideUnusableCols
     }else{
       curCol++
     }
+    go alienBrain(i)
   }
 
   fmt.Printf("Generated %d aliens\n",len(aliens))
-
-  go alienBrain(1)
 }
 
 func drawAliens(screen *ebiten.Image){
-  for i:= range aliens{
-    options := new(ebiten.DrawImageOptions)
-    options.GeoM.Translate(float64(aliens[i].pos.x*CellSize),float64(aliens[i].pos.y*CellSize))
-    screen.DrawImage(aliens[i].sprite,options)
+  for i, a := range aliens {
+    if !a.dead {
+      options := new(ebiten.DrawImageOptions)
+      options.GeoM.Translate(float64(aliens[i].pos.x*CellSize),float64(aliens[i].pos.y*CellSize))
+      screen.DrawImage(aliens[i].sprite,options)
+    }
+  }
+}
+
+func moveBullet(bullet *Bullet, direction int) {
+  for bullet.ready && cellIsFree(Cell{bullet.pos.x, bullet.pos.y-1}) {
+    grid[bullet.pos.y][bullet.pos.x] = 0
+    bullet.pos.y += direction
+    grid[bullet.pos.y][bullet.pos.x] = -2
+    time.Sleep(time.Duration(bulletSleepMS) * time.Millisecond)
+  }
+  bullet.ready = false
+  grid[bullet.pos.y][bullet.pos.x] = 0
+  checkCollision(grid[bullet.pos.y-1][bullet.pos.x])
+}
+
+func initBullets() {
+  bullets = make([]Bullet, MaxBullets)
+
+  xSize := CellSize - BulletXOffset*2
+  ySize := CellSize - BulletYOffset*2
+  bulletSprite = ebiten.NewImage(xSize,ySize)
+  debugColor := color.RGBA{uint8(255), uint8(255), uint8(255), uint8(255)}
+  bulletSprite.Fill(debugColor)
+}
+
+func drawBullets(screen *ebiten.Image) {
+  for _, b := range bullets {
+    if b.ready {
+      options := new(ebiten.DrawImageOptions)
+      options.GeoM.Translate(float64(b.pos.x*CellSize+BulletXOffset), float64(b.pos.y*CellSize+BulletYOffset))
+      screen.DrawImage(b.sprite, options)
+    }
+  }
+}
+
+func playerMove() {
+  for player.lives > 0 && gameState == 0 {
+    time.Sleep(time.Duration(playerMoveSleepMS) * time.Millisecond)
+    if ebiten.IsKeyPressed(ebiten.KeyRight) && cellIsFree(Cell{x:player.pos.x + 1,y:player.pos.y}) {
+      grid[player.pos.y][player.pos.x] = 0; 
+      player.pos.x += 1
+      grid[player.pos.y][player.pos.x] = 1; 
+    } 
+    if ebiten.IsKeyPressed(ebiten.KeyLeft) && cellIsFree(Cell{x:player.pos.x - 1,y:player.pos.y}){
+      grid[player.pos.y][player.pos.x] = 0; 
+      player.pos.x -= 1
+      grid[player.pos.y][player.pos.x] = 1; 
+    }
+  }
+}
+
+func playerShoot() {
+  for player.lives > 0 && gameState == 0 {
+    if ebiten.IsKeyPressed(ebiten.KeySpace) {
+      generatePlayerBullet()
+      time.Sleep(time.Duration(playerShootSleepMS) * time.Millisecond)
+    } 
+  }
+}
+
+func generatePlayerBullet() {
+  for i, b := range bullets {
+    if !b.ready {
+      xPos := player.pos.x
+      yPos := player.pos.y-1
+      grid[yPos][xPos] = -2
+      bullets[i] = Bullet{
+        ready: true,
+        pos: Cell{x:xPos, y:yPos},
+        sprite: bulletSprite,
+      }
+      go moveBullet(&bullets[i], -1)
+      break
+    }
+  }
+}
+
+func initPlayer() {
+  playerSprite = ebiten.NewImage(CellSize,CellSize)
+  debugColor:= color.RGBA{0, uint8(255), 0, uint8(255)}
+  playerSprite.Fill(debugColor)
+  
+  xPos := (WindowW/CellSize - SideUnusableCols*2) / 2
+  yPos := WindowH/CellSize - BotUnusableRows - 1
+  player = Player{
+    lives: 10, 
+    pos: Cell{x:xPos,y:yPos},
+    sprite: playerSprite,
+  }
+
+  go playerMove()
+  go playerShoot()
+}
+
+func drawPlayer(screen *ebiten.Image) {
+  options := new(ebiten.DrawImageOptions)
+  options.GeoM.Translate(float64(player.pos.x*CellSize), float64(player.pos.y*CellSize))
+  screen.DrawImage(player.sprite, options)
+}
+
+func drawText(screen *ebiten.Image) {
+  yPos := WindowH-CellSize*2
+  scoreString := fmt.Sprintf("%d", score)
+  livesString := fmt.Sprintf("%d", player.lives)
+  ebitenutil.DebugPrintAt(screen, "Score: "+scoreString, CellSize, yPos)
+  ebitenutil.DebugPrintAt(screen, "Lives: "+livesString, WindowW-CellSize*4, yPos)
+  if gameState == 1 {
+    ebitenutil.DebugPrintAt(screen, "You win", WindowW/2-CellSize*1, WindowH/2)
+  }
+  if gameState == 2 {
+    ebitenutil.DebugPrintAt(screen, "Game over", WindowW/2-CellSize*2, WindowH/2)
   }
 }
 
 func (g *Game) Update() error {
-  // Write your game's logical update.
+  if countAliens() == 0 && gameState == 0 {
+    gameState = 1
+  } else if player.lives < 0 && gameState == 0 {
+    gameState = 2
+  }
   return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+  drawBullets(screen)
+  drawPlayer(screen)
   drawAliens(screen)
+  drawText(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -201,9 +366,9 @@ func main() {
   rand.Seed(time.Now().UnixNano())
 
   initGrid()
-
+  initBullets()
+  initPlayer()
   initAliens(1)
-
 
   if err := ebiten.RunGame(game); err != nil {
     log.Fatal(err)

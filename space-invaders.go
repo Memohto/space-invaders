@@ -71,6 +71,7 @@ var (
   playerShootSleepMS = 1000
   bullets []Bullet
   bulletSleepMS = 50
+  alienBulletSleepMS = 100
   aliensDeadTicks = 15
 
   //Imgs
@@ -79,6 +80,7 @@ var (
   imgPlayer *ebiten.Image
   imgBullet *ebiten.Image
   imgExpl *ebiten.Image
+  imgAlienBullet *ebiten.Image
 )
 
 // Helper functions
@@ -194,6 +196,9 @@ func loadImages() error{
 
   imgExpl = getSubImgFrom(resizedSpriteSheet,2,3)
 
+  imgAlienBullet = getSubImgFrom(resizedSpriteSheet,2,1)
+
+
   return nil
 }
 
@@ -203,6 +208,34 @@ func alienBrain(id int){
   for !myAlien.dead && gameState == 0{
     time.Sleep(time.Duration(alienSleepMS) * time.Millisecond)
     moveAlien(myAlien)
+    alienShoot(myAlien)
+  }
+}
+
+func alienDamage(){
+  player.lives--
+}
+
+func generateAlienBullet(alien *Alien) {
+  for i, b := range bullets {
+    if !b.ready {
+      xPos := alien.pos.x
+      yPos := alien.pos.y-1
+      grid[yPos][xPos] = -2
+      bullets[i] = Bullet{
+        ready: true,
+        pos: Cell{x:xPos, y:yPos},
+        sprite: imgAlienBullet,
+      }
+      go moveBullet(&bullets[i], 1)
+      break
+    }
+  }
+}
+
+func alienShoot(alien *Alien){
+  if rand.Float64()<0.05{
+    generateAlienBullet(alien)
   }
 }
 
@@ -239,6 +272,11 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
   }
 
   accessGrid <- true
+
+  if alien.pos.y >= player.pos.y {
+    alien.dead = true
+    alienDamage()
+  }
 
 
 }
@@ -295,15 +333,31 @@ func drawAliens(screen *ebiten.Image){
 }
 
 func moveBullet(bullet *Bullet, direction int) {
-  for bullet.ready && cellIsFree(Cell{bullet.pos.x, bullet.pos.y-1}) {
-    grid[bullet.pos.y][bullet.pos.x] = 0
-    bullet.pos.y += direction
-    grid[bullet.pos.y][bullet.pos.x] = -2
-    time.Sleep(time.Duration(bulletSleepMS) * time.Millisecond)
+
+  isPlayer := direction<0
+
+  if isPlayer {
+    for cellIsFree(Cell{bullet.pos.x, bullet.pos.y-1}) {
+        grid[bullet.pos.y][bullet.pos.x] = 0
+        bullet.pos.y += direction
+        grid[bullet.pos.y][bullet.pos.x] = -2
+        time.Sleep(time.Duration(bulletSleepMS) * time.Millisecond)
+    }
+  }else{
+    for !isSameCell(player.pos,bullet.pos) && bullet.pos.y < player.pos.y {
+      bullet.pos.y += direction
+      time.Sleep(time.Duration(alienBulletSleepMS) * time.Millisecond)
+    }
   }
+
   bullet.ready = false
-  grid[bullet.pos.y][bullet.pos.x] = 0
-  checkCollision(grid[bullet.pos.y-1][bullet.pos.x])
+
+  if isPlayer{
+    grid[bullet.pos.y][bullet.pos.x] = 0
+    checkCollision(grid[bullet.pos.y-1][bullet.pos.x])
+  }else if isSameCell(player.pos,bullet.pos){
+    alienDamage()
+  }
 }
 
 func initBullets() {
@@ -422,10 +476,10 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
   drawOverlay(screen)
-  drawBullets(screen)
   drawPlayer(screen)
   drawAliens(screen)
   drawText(screen)
+  drawBullets(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {

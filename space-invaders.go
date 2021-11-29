@@ -9,6 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"time"
+  "strconv"
+  "unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
@@ -67,16 +69,18 @@ const (
 )
 
 var (
-  gameState int // 0 = on going, 1 = win, 2 = lose
+  gameState int = 3 // 0 = on going, 1 = win, 2 = lose, 3 = menu
   score int
   grid [][]int
   aliens []Alien
+  alienCount string
   accessGrid chan bool
   oX,oY,oXf,oYf float64
   player Player
   bullets []Bullet
 
   //Imgs
+  imgLogo *ebiten.Image
   imgIcon *ebiten.Image
   imgAliens []*ebiten.Image
   imgPlayer *ebiten.Image
@@ -139,8 +143,6 @@ func initGrid(){
   rows := int(math.Floor(WindowH/CellSize))
   cols := int(math.Floor(WindowW/CellSize))
   
-  fmt.Printf("%dx%d grid created\n",cols,rows)
-  
   grid = make([][]int, rows)
 
   topUnusable := TopUnusableRows
@@ -167,8 +169,13 @@ func initGrid(){
   oYf = WindowH - offset
 }
 
-func loadImages() error{
+func loadImages() error {
   var err error
+
+  imgLogo,_,err = ebitenutil.NewImageFromFile("img/Logo.png")
+  if err != nil {
+    return err
+  }
 
   imgIcon,_,err = ebitenutil.NewImageFromFile("img/GameIcon.png")
   if err != nil {
@@ -200,14 +207,13 @@ func loadImages() error{
 
   imgAlienBullet = getSubImgFrom(resizedSpriteSheet,2,1)
 
-
   return nil
 }
 
 func alienBrain(id int){
   myAlien := &aliens[id-2]
 
-  for !myAlien.dead && gameState == 0{
+  for !myAlien.dead && gameState == 0 {
     time.Sleep(time.Duration(AlienSleepMS) * time.Millisecond)
     moveAlien(myAlien)
     alienShoot(myAlien)
@@ -265,7 +271,7 @@ func moveAlien(alien *Alien){// Moves alien randomly (Down, Left or Right)
 
   <- accessGrid
 
-  if cellIsFree(target) {
+  if cellIsFree(target) && !alien.dead {
     //If another Alien took the target position in the time frame
     // between calculation and execution, we surrender the space
     grid[alien.pos.y][alien.pos.x] = 0
@@ -316,8 +322,6 @@ func initAliens(amount int){
   for i:= range aliens {
     go alienBrain(aliens[i].id)
   }
-
-  fmt.Printf("Generated %d aliens\n",len(aliens))
 }
 
 func drawAliens(screen *ebiten.Image){
@@ -462,11 +466,52 @@ func drawOverlay(screen *ebiten.Image){
   ebitenutil.DrawLine(screen,oX,oYf,oXf,oYf,color.White)
 }
 
+func drawMenu(screen *ebiten.Image) {
+  options := new(ebiten.DrawImageOptions)
+  options.GeoM.Translate(WindowW/2-CellSize*4, WindowH/2-CellSize*10)
+  options.GeoM.Scale(0.7, 0.7)
+  screen.DrawImage(imgLogo,options)
+  ebitenutil.DebugPrintAt(screen, "Type alien amount (max = 50, default = 20):", CellSize*4, WindowH/2)
+  ebitenutil.DebugPrintAt(screen, alienCount, WindowW/2-CellSize*1, WindowH/2+CellSize)
+  ebitenutil.DebugPrintAt(screen, "Press enter to start", CellSize*7, WindowH/2+CellSize*4)
+}
+
+func inputNumber() {
+  var input []rune
+  input = ebiten.AppendInputChars(input)
+  for _, r := range input {
+    if unicode.IsDigit(r) {
+      alienCount += string(r)
+    } else if r == 100 {
+      if len(alienCount) > 0 {
+        alienCount = alienCount[:len(alienCount)-1]
+      }
+    }
+  }
+}
+
 func (g *Game) Update() error {
+  if ebiten.IsKeyPressed(ebiten.KeyEnter) && (gameState > 0) {
+    intCount, _ := strconv.Atoi(alienCount)
+    if intCount < 1 {
+      intCount = 1
+    } else if intCount > 50 {
+      intCount = 50
+    }
+    gameState = 0
+    score = 0
+    initGrid()
+    initBullets()
+    initPlayer()
+    initAliens(intCount)
+  }
   if countAliens() == 0 && gameState == 0 {
     gameState = 1
-  } else if player.lives < 0 && gameState == 0 {
+  } else if player.lives <= 0 && gameState == 0 {
     gameState = 2
+  }
+  if gameState == 3 {
+    inputNumber()
   }
   for i:= range aliens{
     if aliens[i].dead && aliens[i].deadTicks>0 {
@@ -477,11 +522,15 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+  if gameState == 0 {
+    drawPlayer(screen)
+    drawAliens(screen)
+    drawBullets(screen)
+  } else if gameState == 3 {
+    drawMenu(screen)
+  }
   drawOverlay(screen)
-  drawPlayer(screen)
-  drawAliens(screen)
   drawText(screen)
-  drawBullets(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
@@ -503,10 +552,6 @@ func main() {
 
   accessGrid = make( chan bool , 1)
   accessGrid <- true
-
-  initBullets()
-  initPlayer()
-  initAliens(200)
 
   if err := ebiten.RunGame(game); err != nil {
     log.Fatal(err)

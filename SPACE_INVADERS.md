@@ -1,7 +1,7 @@
 # Space invaders
 
 ## Demo video
-<Vídeo aquí perro>
+<https://youtu.be/dDnbNAS5r8I>
 
 ## Build/run automation
 | Command | Description |

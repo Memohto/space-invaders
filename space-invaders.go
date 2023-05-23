@@ -430,7 +430,7 @@ func initPlayer() {
   xPos := (WindowW/CellSize - SideUnusableCols*2) / 2
   yPos := WindowH/CellSize - BotUnusableRows - 1
   player = Player{
-    lives: 10, 
+    lives: 3, 
     pos: Cell{x:xPos,y:yPos},
     sprite: imgPlayer,
   }
@@ -471,7 +471,7 @@ func drawMenu(screen *ebiten.Image) {
   options.GeoM.Translate(WindowW/2-CellSize*4, WindowH/2-CellSize*10)
   options.GeoM.Scale(0.7, 0.7)
   screen.DrawImage(imgLogo,options)
-  ebitenutil.DebugPrintAt(screen, "Type alien amount (max = 50, default = 20):", CellSize*4, WindowH/2)
+  ebitenutil.DebugPrintAt(screen, "Type alien amount (max = 50, default = 1):", CellSize*4, WindowH/2)
   ebitenutil.DebugPrintAt(screen, alienCount, WindowW/2-CellSize*1, WindowH/2+CellSize)
   ebitenutil.DebugPrintAt(screen, "Press enter to start", CellSize*7, WindowH/2+CellSize*4)
 }
